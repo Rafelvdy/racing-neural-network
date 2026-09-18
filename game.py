@@ -12,8 +12,13 @@ track = pygame.transform.scale(track, (1200,800))
 start_pos = find_start_position(track)
 car1 = car(start_pos)
 
+def draw(screen, images):
+    for img, pos in images:
+        screen.blit(img, pos)
+
 FPS = 60
 clock = pygame.time.Clock()
+images = [(track, (0,0)), (car1.image,car1.rect)]
 
 while running:
     clock.tick(FPS)
@@ -22,6 +27,5 @@ while running:
         if event.type == pygame.QUIT:
             running = False  
 
-    screen.blit(track, (0,0))
-    screen.blit(car1.image,car1.rect)
+    draw(screen, images)
     pygame.display.update()

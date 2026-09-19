@@ -6,10 +6,12 @@ class car(pygame.sprite.Sprite):
         self.image = pygame.image.load("car.png").convert_alpha()
         self.rect = self.image.get_rect()
         self.rect.center = location
-        self.max_vel - max_vel
-        self.vel = 0
+        self.max_vel = max_vel
+        self.vel = 5
         self.rotation_vel = rotation_vel
         self.angle = 0
+        self.x, self.y = location
+        self.acceleration = 0.1
 
     def rotate(self, left=False, right=False):
         if left:
@@ -17,10 +19,15 @@ class car(pygame.sprite.Sprite):
         elif right:
             self.angle -= self.rotation_vel
 
+    def draw(self, screen):
+        blit_rotate_center(screen, self.image, (self.x, self.y), self.angle)
+
+    def move_forward():
+
 
 def blit_rotate_center(screen, image, top_left, angle):
     rotated_image = pygame.transform.rotate(image, angle)
-    new_rect = rotated_image.get_rect(center=image.get_rect(topLeft = top_left).center)
+    new_rect = rotated_image.get_rect(center=image.get_rect(topleft = top_left).center)
     screen.blit(rotated_image, new_rect.topleft)
 
 def find_start_position(surface, target=(255, 255, 255), tolerance=20):

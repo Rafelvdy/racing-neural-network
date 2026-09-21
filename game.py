@@ -1,7 +1,6 @@
 import pygame
 from utils import car, find_start_position
 
-
 running = True
 screen = pygame.display.set_mode((1200,800))
 pygame.display.set_caption("Racing neural network")
@@ -31,14 +30,27 @@ while running:
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            running = False  
-
+            running = False
 
     keys = pygame.key.get_pressed()
+    moved = False
 
-    if keys[pygame.k_a]:
-        car1.rotate(Left=True)
-    elif keys[pygame.k_d]:
-        car1.rotate(Right=True)
-    
-    
+    if car1.alive:
+        if keys[pygame.K_a]:
+            car1.rotate(left=True)
+        if keys[pygame.K_d]:
+            car1.rotate(right=True)
+        if keys[pygame.K_w]:
+            moved = True
+            car1.move_forward(track)
+
+        if keys[pygame.K_s]:
+            car1.break_car()
+        
+        if not moved:
+            car1.reduce_speed(track)
+
+        if keys[pygame.K_r]:
+            car1.reset(start_pos)
+
+  

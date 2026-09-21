@@ -5,6 +5,8 @@ GRASS = (34, 177, 76)
 TOLERANCE = 25
 START_COLOUR = (255, 255, 255)
 START_TOLERANCE = 20
+SENSOR_ANGLES = [-60, -30, 0, 30, 60]
+SENSOR_MAX_RANGE = 200
 
 class car(pygame.sprite.Sprite):
     def __init__(self, location, max_vel, rotation_vel):
@@ -38,11 +40,16 @@ class car(pygame.sprite.Sprite):
         elif right:
             self.angle -= self.rotation_vel
 
-    def draw(self, screen):
+    def draw(self, screen, track):
         blit_rotate_center(screen, self.image, (self.x, self.y), self.angle)
-        for corner_x, corner_y in self.get_corners():           # debug dots
+
+        for corner_x, corner_y in self.get_corners():
             colour = (255, 0, 255) if self.alive else (100, 100, 100)
             pygame.draw.circle(screen, colour, (int(corner_x), int(corner_y)), 3)
+
+        for distance, (end_x, end_y) in self.get_sensor_readings(track):
+            pygame.draw.line(screen, (0, 200, 255), (self.x, self.y), (end_x, end_y), 1)
+            pygame.draw.circle(screen, (0, 200, 255), (int(end_x), int(end_y)), 3)
 
     def check_crash(self, track):
         if not self.alive:
@@ -102,6 +109,26 @@ class car(pygame.sprite.Sprite):
         elif on_start and self.left_start:
             self.lap_complete = True
             self.lap_time = (pygame.time.get_ticks() - self.start_time) / 1000
+
+    def get_forward_vector(self):
+        corners = self.get_corners()
+        front_x = (corners[2][0] + corners[3][0]) / 2
+        front_y = (corners[2][1] + corners[3][1]) / 2
+        dx = front_x - self.x
+        dy = front_y - self.y
+        length = math.hypot(dx, dy)
+        return dx / length, dy / length
+
+    def get_sensor_readings(self, track):
+        fx, fy = self.get_forward_vector()
+        base_angle = math.degrees(math.atan2(fy, fx))
+
+        readings = []
+        for offset in SENSOR_ANGLES:
+            angle = base_angle + offset
+            distance, endpoint = cast_ray(track, self.x, self.y, angle, SENSOR_MAX_RANGE)
+            readings.append((distance, endpoint))
+        return readings
     
         
 def blit_rotate_center(screen, image, center, angle):
@@ -153,3 +180,18 @@ def is_start(surface, x, y):
         return False
     r, g, b, *_ = surface.get_at((int(x), int(y)))
     return all(abs(c - t) <= START_TOLERANCE for c, t in zip((r, g, b), START_COLOUR))
+
+def cast_ray(track, cx, cy, angle_degrees, max_range=200, step=4):
+    radians = math.radians(angle_degrees)
+    dx = math.cos(radians)
+    dy = math.sin(radians)
+
+    distance = 0
+    while distance < max_range:
+        px = cx + dx * distance
+        py = cy + dy * distance
+        if is_grass(track, px, py):
+            break
+        distance += step
+
+    return distance, (px, py)

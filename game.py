@@ -14,11 +14,11 @@ car1 = car(start_pos, 5,4)
 pygame.font.init()
 font = pygame.font.SysFont(None, 36)
 
-def draw(screen, images, agent_car):
+def draw(screen, images, agent_car, track):
     for img, pos in images:
         screen.blit(img, pos)
 
-    agent_car.draw(screen)
+    agent_car.draw(screen, track)
 
     if agent_car.lap_complete:
         text = f"Lap complete: {agent_car.lap_time:.2f}s"
@@ -44,7 +44,7 @@ images = [(track, (0,0))]
 while running:
     clock.tick(FPS)
 
-    draw(screen, images, car1)
+    draw(screen, images, car1, track)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:

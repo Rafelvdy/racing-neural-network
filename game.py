@@ -11,11 +11,29 @@ track = pygame.transform.scale(track, (1200,800))
 start_pos = find_start_position(track)
 car1 = car(start_pos, 5,4)
 
+pygame.font.init()
+font = pygame.font.SysFont(None, 36)
+
 def draw(screen, images, agent_car):
     for img, pos in images:
         screen.blit(img, pos)
 
     agent_car.draw(screen)
+
+    if agent_car.lap_complete:
+        text = f"Lap complete: {agent_car.lap_time:.2f}s"
+        colour = (0, 255, 0)
+    elif not agent_car.alive:
+        text = f"Crashed at {agent_car.crash_time:.2f}s"
+        colour = (255, 0, 0)
+    else:
+        elapsed = (pygame.time.get_ticks() - agent_car.start_time) / 1000
+        text = f"Time: {elapsed:.2f}s"
+        colour = (255, 255, 255)
+
+    text_surface = font.render(text, True, colour)
+    screen.blit(text_surface, (10, 10))
+
     pygame.display.update()
 
 FPS = 60
@@ -50,7 +68,7 @@ while running:
         if not moved:
             car1.reduce_speed(track)
 
-        if keys[pygame.K_r]:
-            car1.reset(start_pos)
+    if keys[pygame.K_r]:
+        car1.reset(start_pos)
 
   

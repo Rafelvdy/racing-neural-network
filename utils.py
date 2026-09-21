@@ -3,6 +3,8 @@ import math
 
 GRASS = (34, 177, 76)
 TOLERANCE = 25
+START_COLOUR = (255, 255, 255)
+START_TOLERANCE = 20
 
 class car(pygame.sprite.Sprite):
     def __init__(self, location, max_vel, rotation_vel):
@@ -19,6 +21,11 @@ class car(pygame.sprite.Sprite):
         self.half_w = self.rect.width / 2
         self.half_h = self.rect.height / 2
         self.alive = True
+        self.left_start = False
+        self.lap_complete = False
+        self.start_time = pygame.time.get_ticks()
+        self.lap_time = None
+        self.crash_time = None
 
     def get_corners(self, x=None, y=None):
         cx = self.x if x is None else x
@@ -44,6 +51,7 @@ class car(pygame.sprite.Sprite):
         if any(is_grass(track, cx, cy) for cx, cy in corners):
             self.alive = False
             self.vel = 0
+            self.crash_time = (pygame.time.get_ticks() - self.start_time) / 1000
 
     def move_forward(self, track):
         if not self.alive:
@@ -51,6 +59,7 @@ class car(pygame.sprite.Sprite):
         self.vel = min(self.vel + self.acceleration, self.max_vel)
         self.move()
         self.check_crash(track)
+        self.check_lap(track)
 
     def move(self):
         radians = math.radians(self.angle)
@@ -76,6 +85,23 @@ class car(pygame.sprite.Sprite):
         self.vel = 0
         self.angle = 270
         self.alive = True
+        self.left_start = False
+        self.lap_complete = False
+        self.lap_time = None
+        self.crash_time = None
+        self.start_time = pygame.time.get_ticks()
+
+    def check_lap(self, track):
+        if not self.alive or self.lap_complete:
+            return
+        on_start = is_start(track, self.x, self.y)
+
+        if not on_start and not self.left_start:
+            self.left_start = True
+
+        elif on_start and self.left_start:
+            self.lap_complete = True
+            self.lap_time = (pygame.time.get_ticks() - self.start_time) / 1000
     
         
 def blit_rotate_center(screen, image, center, angle):
@@ -121,3 +147,9 @@ def get_rotated_corners(cx, cy, half_w, half_h, angle_degrees):
         world_corners.append((cx + rotated_x, cy + rotated_y))
 
     return world_corners
+
+def is_start(surface, x, y):
+    if x < 0 or y < 0 or x >= surface.get_width() or y >= surface.get_height():
+        return False
+    r, g, b, *_ = surface.get_at((int(x), int(y)))
+    return all(abs(c - t) <= START_TOLERANCE for c, t in zip((r, g, b), START_COLOUR))

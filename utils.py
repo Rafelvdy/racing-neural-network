@@ -1,7 +1,9 @@
 import pygame
 import math
-from network import random_weights, random_biases, forward
 import random
+import json
+from network import random_weights, random_biases, forward
+
 
 GRASS = (34, 177, 76)
 TOLERANCE = 25
@@ -9,9 +11,11 @@ START_COLOUR = (255, 255, 255)
 START_TOLERANCE = 20
 SENSOR_ANGLES = [-60, -30, 0, 30, 60]
 SENSOR_MAX_RANGE = 200
+CHECKPOINT_RADIUS = 40
+
 
 class car(pygame.sprite.Sprite):
-    def __init__(self, location, max_vel, rotation_vel):
+    def __init__(self, location, max_vel, rotation_vel, checkpoints=None):
         pygame.sprite.Sprite.__init__(self)
         self.image = pygame.image.load("car.png").convert_alpha()
         self.rect = self.image.get_rect()
@@ -30,7 +34,14 @@ class car(pygame.sprite.Sprite):
         self.start_time = pygame.time.get_ticks()
         self.lap_time = None
         self.crash_time = None
-        self.distance_travelled = 0
+
+        self.start_location = location
+        self.max_distance_from_start = 0
+        self.closest_distance_to_next = float("inf")
+
+        self.checkpoints = checkpoints or []
+        self.next_checkpoint_index = 0
+        self.checkpoints_passed = 0
 
         self.hidden_weights = random_weights(3, 5)
         self.hidden_biases = random_biases(3)
@@ -68,6 +79,20 @@ class car(pygame.sprite.Sprite):
             self.vel = 0
             self.crash_time = (pygame.time.get_ticks() - self.start_time) / 1000
 
+    def check_checkpoints(self):
+        if not self.checkpoints or self.next_checkpoint_index >= len(self.checkpoints):
+            return
+        target_x, target_y = self.checkpoints[self.next_checkpoint_index]
+        distance = math.hypot(self.x - target_x, self.y - target_y)
+
+        if distance < self.closest_distance_to_next:
+            self.closest_distance_to_next = distance
+
+        if distance < CHECKPOINT_RADIUS:
+            self.checkpoints_passed += 1
+            self.next_checkpoint_index += 1
+            self.closest_distance_to_next = float("inf")
+
     def move_forward(self, track):
         if not self.alive:
             return
@@ -75,14 +100,18 @@ class car(pygame.sprite.Sprite):
         self.move()
         self.check_crash(track)
         self.check_lap(track)
+        self.check_checkpoints()
 
     def move(self):
         radians = math.radians(self.angle)
         vertical = math.cos(radians) * self.vel
         horizontal = math.sin(radians) * self.vel
-        self.distance_travelled += math.hypot(horizontal, vertical)
         self.x += horizontal
         self.y += vertical
+
+        current_distance = math.hypot(self.x - self.start_location[0], self.y - self.start_location[1])
+        if current_distance > self.max_distance_from_start:
+            self.max_distance_from_start = current_distance
 
     def reduce_speed(self, track):
         if not self.alive:
@@ -90,6 +119,8 @@ class car(pygame.sprite.Sprite):
         self.vel = max(self.vel - self.acceleration / 2, 0)
         self.move()
         self.check_crash(track)
+        self.check_lap(track)
+        self.check_checkpoints()
 
     def break_car(self):
         if not self.alive:
@@ -105,17 +136,23 @@ class car(pygame.sprite.Sprite):
         self.lap_complete = False
         self.lap_time = None
         self.crash_time = None
+        self.max_distance_from_start = 0
+        self.next_checkpoint_index = 0
+        self.checkpoints_passed = 0
         self.start_time = pygame.time.get_ticks()
+        self.closest_distance_to_next = float("inf")
 
     def check_lap(self, track):
         if not self.alive or self.lap_complete:
             return
         on_start = is_start(track, self.x, self.y)
-
+    
         if not on_start and not self.left_start:
             self.left_start = True
 
         elif on_start and self.left_start:
+            if self.checkpoints and self.checkpoints_passed < len(self.checkpoints):
+                return   # hasn't actually completed the track — not a real lap
             self.lap_complete = True
             self.lap_time = (pygame.time.get_ticks() - self.start_time) / 1000
 
@@ -138,7 +175,7 @@ class car(pygame.sprite.Sprite):
             distance, endpoint = cast_ray(track, self.x, self.y, angle, SENSOR_MAX_RANGE)
             readings.append((distance, endpoint))
         return readings
-    
+
     def get_sensor_distances(self, track):
         readings = self.get_sensor_readings(track)
         return [distance / SENSOR_MAX_RANGE for distance, _ in readings]
@@ -146,7 +183,7 @@ class car(pygame.sprite.Sprite):
     def drive_with_network(self, track):
         inputs = self.get_sensor_distances(track)
         steering, throttle = forward(inputs, self.hidden_weights, self.hidden_biases,
-                                    self.output_weights, self.output_biases)
+                                      self.output_weights, self.output_biases)
 
         if steering > 0.1:
             self.rotate(right=True)
@@ -160,14 +197,19 @@ class car(pygame.sprite.Sprite):
 
     def fitness(self):
         if self.lap_complete:
-            return 100000 + self.distance_travelled - (self.lap_time * 100)
-        return self.distance_travelled
-    
-        
+            return 1_000_000 + (self.checkpoints_passed * 1000) - (self.lap_time * 100)
+
+        if self.checkpoints:
+            return (self.checkpoints_passed * 1000) - self.closest_distance_to_next
+
+        return self.max_distance_from_start
+
+
 def blit_rotate_center(screen, image, center, angle):
     rotated_image = pygame.transform.rotate(image, angle)
     new_rect = rotated_image.get_rect(center=center)
     screen.blit(rotated_image, new_rect.topleft)
+
 
 def find_start_position(surface, target=(255, 255, 255), tolerance=20):
     xs, ys = [], []
@@ -182,11 +224,13 @@ def find_start_position(surface, target=(255, 255, 255), tolerance=20):
         raise ValueError("No start-line pixels found")
     return sum(xs) // len(xs), sum(ys) // len(ys)
 
+
 def is_grass(surface, x, y):
     if x < 0 or y < 0 or x >= surface.get_width() or y >= surface.get_height():
         return True
     r, g, b, *_ = surface.get_at((int(x), int(y)))
     return all(abs(c - t) <= TOLERANCE for c, t in zip((r, g, b), GRASS))
+
 
 def get_rotated_corners(cx, cy, half_w, half_h, angle_degrees):
     radians = math.radians(angle_degrees)
@@ -208,11 +252,13 @@ def get_rotated_corners(cx, cy, half_w, half_h, angle_degrees):
 
     return world_corners
 
+
 def is_start(surface, x, y):
     if x < 0 or y < 0 or x >= surface.get_width() or y >= surface.get_height():
         return False
     r, g, b, *_ = surface.get_at((int(x), int(y)))
     return all(abs(c - t) <= START_TOLERANCE for c, t in zip((r, g, b), START_COLOUR))
+
 
 def cast_ray(track, cx, cy, angle_degrees, max_range=200, step=4):
     radians = math.radians(angle_degrees)
@@ -220,6 +266,7 @@ def cast_ray(track, cx, cy, angle_degrees, max_range=200, step=4):
     dy = math.sin(radians)
 
     distance = 0
+    px, py = cx, cy
     while distance < max_range:
         px = cx + dx * distance
         py = cy + dy * distance
@@ -229,9 +276,11 @@ def cast_ray(track, cx, cy, angle_degrees, max_range=200, step=4):
 
     return distance, (px, py)
 
+
 def crossover(parent_a, parent_b):
     def mix_matrix(ma, mb):
         return [[random.choice([va, vb]) for va, vb in zip(ra, rb)] for ra, rb in zip(ma, mb)]
+
     def mix_vector(va, vb):
         return [random.choice([a, b]) for a, b in zip(va, vb)]
 
@@ -249,6 +298,7 @@ def mutate(weights_bundle, rate=0.15, strength=0.4):
     def mutate_matrix(m):
         return [[v + random.uniform(-strength, strength) if random.random() < rate else v
                  for v in row] for row in m]
+
     def mutate_vector(v):
         return [x + random.uniform(-strength, strength) if random.random() < rate else x
                 for x in v]
@@ -261,13 +311,13 @@ def mutate(weights_bundle, rate=0.15, strength=0.4):
     )
 
 
-def next_generation(cars, start_pos):
+def next_generation(cars, start_pos, checkpoints=None, mutation_strength=0.4):
     ranked = sorted(cars, key=lambda c: c.fitness(), reverse=True)
     survivors = ranked[:4]
 
     new_cars = []
     best = survivors[0]
-    elite = car(start_pos, 5, 4)
+    elite = car(start_pos, 5, 4, checkpoints=checkpoints)
     elite.hidden_weights = best.hidden_weights
     elite.hidden_biases = best.hidden_biases
     elite.output_weights = best.output_weights
@@ -276,10 +326,38 @@ def next_generation(cars, start_pos):
 
     while len(new_cars) < len(cars):
         parent_a, parent_b = random.sample(survivors, 2)
-        mutated = mutate(crossover(parent_a, parent_b))
+        mutated = mutate(crossover(parent_a, parent_b), strength=mutation_strength)
 
-        child = car(start_pos, 5, 4)
+        child = car(start_pos, 5, 4, checkpoints=checkpoints)
         child.hidden_weights, child.hidden_biases, child.output_weights, child.output_biases = mutated
         new_cars.append(child)
 
     return new_cars
+
+
+def save_weights(car_obj, filename="best_car.json"):
+    data = {
+        "hidden_weights": car_obj.hidden_weights,
+        "hidden_biases": car_obj.hidden_biases,
+        "output_weights": car_obj.output_weights,
+        "output_biases": car_obj.output_biases,
+    }
+    with open(filename, "w") as f:
+        json.dump(data, f)
+
+
+def load_weights(car_obj, filename="best_car.json"):
+    with open(filename) as f:
+        data = json.load(f)
+    car_obj.hidden_weights = data["hidden_weights"]
+    car_obj.hidden_biases = data["hidden_biases"]
+    car_obj.output_weights = data["output_weights"]
+    car_obj.output_biases = data["output_biases"]
+
+
+def load_checkpoints(filename="checkpoints.json"):
+    try:
+        with open(filename) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []

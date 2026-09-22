@@ -1,5 +1,5 @@
 import pygame
-from utils import car, find_start_position, next_generation
+from utils import car, find_start_position, next_generation, save_weights, load_checkpoints
 
 running = True
 screen = pygame.display.set_mode((1200, 800))
@@ -9,15 +9,20 @@ track = pygame.image.load("track1.png")
 track = pygame.transform.scale(track, (1200, 800))
 
 start_pos = find_start_position(track)
-cars = [car(start_pos, 5, 4) for _ in range(10)]
+checkpoints = load_checkpoints("checkpoints.json")
+
+cars = [car(start_pos, 5, 4, checkpoints=checkpoints) for _ in range(10)]
 
 pygame.font.init()
 font = pygame.font.SysFont(None, 36)
 
 
-def draw(screen, images, cars, track):
+def draw(screen, images, cars, track, checkpoints):
     for img, pos in images:
         screen.blit(img, pos)
+
+    for x, y in checkpoints:
+        pygame.draw.circle(screen, (255, 165, 0), (x, y), 6, 1)
 
     alive_count = 0
     for c in cars:
@@ -36,9 +41,20 @@ clock = pygame.time.Clock()
 images = [(track, (0, 0))]
 generation = 1
 
+GENERATION_TIMEOUT_MS = 35000
+generation_start_time = pygame.time.get_ticks()
+
+BASE_MUTATION_STRENGTH = 0.4
+MAX_MUTATION_STRENGTH = 1.5
+STAGNATION_LIMIT = 30
+
+best_fitness_ever = float("-inf")
+generations_without_improvement = 0
+mutation_strength = BASE_MUTATION_STRENGTH
+
 while running:
     clock.tick(FPS)
-    draw(screen, images, cars, track)
+    draw(screen, images, cars, track, checkpoints)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -47,11 +63,33 @@ while running:
     for c in cars:
         c.drive_with_network(track)
 
-    all_done = all((not c.alive) or c.lap_complete for c in cars)
+    elapsed = pygame.time.get_ticks() - generation_start_time
+    all_done = all((not c.alive) or c.lap_complete for c in cars) or elapsed > GENERATION_TIMEOUT_MS
+
     if all_done:
-        best_fitness = max(c.fitness() for c in cars)
-        print(f"Generation {generation} done. Best fitness: {best_fitness:.1f}")
-        cars = next_generation(cars, start_pos)
+        best_car = max(cars, key=lambda c: c.fitness())
+        current_best = best_car.fitness()
+
+        if current_best > best_fitness_ever:
+            best_fitness_ever = current_best
+            generations_without_improvement = 0
+            mutation_strength = BASE_MUTATION_STRENGTH
+        else:
+            generations_without_improvement += 1
+
+        if generations_without_improvement > STAGNATION_LIMIT:
+            mutation_strength = min(mutation_strength * 1.2, MAX_MUTATION_STRENGTH)
+
+        print(f"Generation {generation} done. Best fitness: {current_best:.1f}, "
+              f"checkpoints passed: {best_car.checkpoints_passed}/{len(checkpoints)}, "
+              f"stagnant for: {generations_without_improvement}, "
+              f"mutation strength: {mutation_strength:.2f}")
+
+        save_weights(best_car, "best_car.json")
+
+        cars = next_generation(cars, start_pos, checkpoints=checkpoints,
+                                mutation_strength=mutation_strength)
         generation += 1
+        generation_start_time = pygame.time.get_ticks()
 
 pygame.quit()

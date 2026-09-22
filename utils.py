@@ -29,6 +29,7 @@ class car(pygame.sprite.Sprite):
         self.start_time = pygame.time.get_ticks()
         self.lap_time = None
         self.crash_time = None
+        self.distance_travelled = 0
 
         self.hidden_weights = random_weights(3, 5)
         self.hidden_biases = random_biases(3)
@@ -78,6 +79,7 @@ class car(pygame.sprite.Sprite):
         radians = math.radians(self.angle)
         vertical = math.cos(radians) * self.vel
         horizontal = math.sin(radians) * self.vel
+        self.distance_travelled += math.hypot(horizontal, vertical)
         self.x += horizontal
         self.y += vertical
 

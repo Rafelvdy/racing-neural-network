@@ -43,32 +43,16 @@ images = [(track, (0,0))]
 
 while running:
     clock.tick(FPS)
-
     draw(screen, images, car1, track)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
 
-    keys = pygame.key.get_pressed()
-    moved = False
+    car1.drive_with_network(track)
 
-    if car1.alive:
-        if keys[pygame.K_a]:
-            car1.rotate(left=True)
-        if keys[pygame.K_d]:
-            car1.rotate(right=True)
-        if keys[pygame.K_w]:
-            moved = True
-            car1.move_forward(track)
-
-        if keys[pygame.K_s]:
-            car1.break_car()
-        
-        if not moved:
-            car1.reduce_speed(track)
-
-    if keys[pygame.K_r]:
-        car1.reset(start_pos)
+    if keys := pygame.key.get_pressed():
+        if keys[pygame.K_r]:
+            car1.reset(start_pos)
 
   

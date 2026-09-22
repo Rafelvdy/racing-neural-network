@@ -1,5 +1,6 @@
 import pygame
 import math
+from network import random_weights, random_biases, forward
 
 GRASS = (34, 177, 76)
 TOLERANCE = 25
@@ -28,6 +29,11 @@ class car(pygame.sprite.Sprite):
         self.start_time = pygame.time.get_ticks()
         self.lap_time = None
         self.crash_time = None
+
+        self.hidden_weights = random_weights(3, 5)
+        self.hidden_biases = random_biases(3)
+        self.output_weights = random_weights(2, 3)
+        self.output_biases = random_biases(2)
 
     def get_corners(self, x=None, y=None):
         cx = self.x if x is None else x
@@ -129,6 +135,25 @@ class car(pygame.sprite.Sprite):
             distance, endpoint = cast_ray(track, self.x, self.y, angle, SENSOR_MAX_RANGE)
             readings.append((distance, endpoint))
         return readings
+    
+    def get_sensor_distances(self, track):
+        readings = self.get_sensor_readings(track)
+        return [distance / SENSOR_MAX_RANGE for distance, _ in readings]
+
+    def drive_with_network(self, track):
+        inputs = self.get_sensor_distances(track)
+        steering, throttle = forward(inputs, self.hidden_weights, self.hidden_biases,
+                                    self.output_weights, self.output_biases)
+
+        if steering > 0.1:
+            self.rotate(right=True)
+        elif steering < -0.1:
+            self.rotate(left=True)
+
+        if throttle > 0:
+            self.move_forward(track)
+        else:
+            self.reduce_speed(track)
     
         
 def blit_rotate_center(screen, image, center, angle):

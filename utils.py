@@ -1,6 +1,7 @@
 import pygame
 import math
 from network import random_weights, random_biases, forward
+import random
 
 GRASS = (34, 177, 76)
 TOLERANCE = 25
@@ -156,6 +157,11 @@ class car(pygame.sprite.Sprite):
             self.move_forward(track)
         else:
             self.reduce_speed(track)
+
+    def fitness(self):
+        if self.lap_complete:
+            return 100000 + self.distance_travelled - (self.lap_time * 100)
+        return self.distance_travelled
     
         
 def blit_rotate_center(screen, image, center, angle):
@@ -222,3 +228,58 @@ def cast_ray(track, cx, cy, angle_degrees, max_range=200, step=4):
         distance += step
 
     return distance, (px, py)
+
+def crossover(parent_a, parent_b):
+    def mix_matrix(ma, mb):
+        return [[random.choice([va, vb]) for va, vb in zip(ra, rb)] for ra, rb in zip(ma, mb)]
+    def mix_vector(va, vb):
+        return [random.choice([a, b]) for a, b in zip(va, vb)]
+
+    return (
+        mix_matrix(parent_a.hidden_weights, parent_b.hidden_weights),
+        mix_vector(parent_a.hidden_biases, parent_b.hidden_biases),
+        mix_matrix(parent_a.output_weights, parent_b.output_weights),
+        mix_vector(parent_a.output_biases, parent_b.output_biases),
+    )
+
+
+def mutate(weights_bundle, rate=0.15, strength=0.4):
+    hidden_weights, hidden_biases, output_weights, output_biases = weights_bundle
+
+    def mutate_matrix(m):
+        return [[v + random.uniform(-strength, strength) if random.random() < rate else v
+                 for v in row] for row in m]
+    def mutate_vector(v):
+        return [x + random.uniform(-strength, strength) if random.random() < rate else x
+                for x in v]
+
+    return (
+        mutate_matrix(hidden_weights),
+        mutate_vector(hidden_biases),
+        mutate_matrix(output_weights),
+        mutate_vector(output_biases),
+    )
+
+
+def next_generation(cars, start_pos):
+    ranked = sorted(cars, key=lambda c: c.fitness(), reverse=True)
+    survivors = ranked[:4]
+
+    new_cars = []
+    best = survivors[0]
+    elite = car(start_pos, 5, 4)
+    elite.hidden_weights = best.hidden_weights
+    elite.hidden_biases = best.hidden_biases
+    elite.output_weights = best.output_weights
+    elite.output_biases = best.output_biases
+    new_cars.append(elite)
+
+    while len(new_cars) < len(cars):
+        parent_a, parent_b = random.sample(survivors, 2)
+        mutated = mutate(crossover(parent_a, parent_b))
+
+        child = car(start_pos, 5, 4)
+        child.hidden_weights, child.hidden_biases, child.output_weights, child.output_biases = mutated
+        new_cars.append(child)
+
+    return new_cars

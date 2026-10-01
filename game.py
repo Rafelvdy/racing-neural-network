@@ -125,8 +125,10 @@ def run_training(screen, track, checkpoints, weights_file, archive_file,
     start_pos = find_start_position(track)
     cars = [car(start_pos, 5, 4, checkpoints=checkpoints)
             for _ in range(population_size)]
+    loaded_existing_weights = False
     try:
         load_weights(cars[0], weights_file)
+        loaded_existing_weights = True
     except FileNotFoundError:
         pass
 
@@ -162,15 +164,21 @@ def run_training(screen, track, checkpoints, weights_file, archive_file,
                      if not current_car.is_recovery]
         best_car = max(normal_start_cars, key=lambda current_car: current_car.fitness())
         current_best = best_car.fitness()
+        existing_best = cars[0].fitness() if loaded_existing_weights else float("-inf")
         update_checkpoint_archive(cars, checkpoint_archive)
 
-        if current_best > best_fitness_ever:
+        improved_saved_model = current_best > best_fitness_ever
+        if loaded_existing_weights and generation == 1:
+            improved_saved_model = current_best > existing_best
+
+        if improved_saved_model:
             best_fitness_ever = current_best
             generations_without_improvement = 0
             mutation_strength = BASE_MUTATION_STRENGTH
             mutation_rate = BASE_MUTATION_RATE
             save_weights(best_car, weights_file)
         else:
+            best_fitness_ever = max(best_fitness_ever, existing_best)
             generations_without_improvement += 1
 
         if generations_without_improvement > STAGNATION_LIMIT:

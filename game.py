@@ -3,7 +3,8 @@ import os
 
 import pygame
 
-from utils import (car, find_start_position, load_archive, load_checkpoints,
+from utils import (CHECKPOINT_GATE_HALF_WIDTH, car, checkpoint_gate,
+                   find_start_position, load_archive, load_checkpoints,
                    load_weights, next_generation, save_archive, save_weights,
                    update_checkpoint_archive)
 
@@ -59,8 +60,14 @@ def load_track(track_file):
 
 def draw(screen, cars, track, checkpoints, status):
     screen.blit(track, (0, 0))
-    for x, y in checkpoints:
-        pygame.draw.circle(screen, (255, 165, 0), (x, y), 6, 1)
+    for index, (x, y) in enumerate(checkpoints):
+        gate_start, gate_end = checkpoint_gate(
+            checkpoints,
+            index,
+            CHECKPOINT_GATE_HALF_WIDTH,
+        )
+        pygame.draw.line(screen, (255, 165, 0), gate_start, gate_end, 2)
+        pygame.draw.circle(screen, (255, 165, 0), (x, y), 4, 1)
 
     alive_count = 0
     for current_car in cars:

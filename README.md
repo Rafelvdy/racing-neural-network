@@ -229,6 +229,14 @@ Checkpoint order matters. A checkpoint file is simply an ordered JSON list of `[
 
 Cars do not require every track to have the same start-line orientation. On a track with checkpoints, each normal-start car automatically points from the detected start position toward the first checkpoint. Recovery cars point toward the next checkpoint in their recovery section. For a track without checkpoints, the simulator falls back to the default 270-degree starting angle, so add at least one checkpoint when the route direction matters.
 
+### Checkpoint gates
+
+Checkpoints are scored as directional gates rather than small target circles. The simulator draws an orange line through each checkpoint, perpendicular to the local route direction. A car passes a checkpoint when its movement crosses that line while travelling in the intended forward direction. Being near the orange circle is not enough.
+
+The gate currently extends 55 pixels on either side of its checkpoint centre. This should cover the road in the included tracks. When creating a new track, inspect the drawn orange lines while training. If a line does not reach both road edges, adjust `CHECKPOINT_GATE_HALF_WIDTH` in `utils.py`. Place checkpoint centres near the road centre and keep them away from junctions where a single gate could be crossed accidentally.
+
+The car may advance to a later gate if it crosses that gate first while moving in its intended direction. This supports a genuine shortcut: the skipped section is treated as completed, but the car still has to cross the later gates and finish the lap. The route geometry, gate width, and checkpoint placement therefore determine which shortcuts are valid; the neural network does not receive checkpoint positions as inputs.
+
 ## Project Files
 
 - `game.py`: command-line training and testing runner

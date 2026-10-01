@@ -1,11 +1,23 @@
-import pygame
+import argparse
 import json
+import os
+
+import pygame
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--track", default="track1.png")
+parser.add_argument("--output", default=None)
+args = parser.parse_args()
+output_file = args.output or f"{os.path.splitext(args.track)[0]}_checkpoints.json"
 
 pygame.init()
-track = pygame.image.load("track1.png")
+track = pygame.image.load(args.track)
 track = pygame.transform.scale(track, (1200, 800))
 screen = pygame.display.set_mode((1200, 800))
-pygame.display.set_caption("Click checkpoints in order | Z = undo | S = save")
+pygame.display.set_caption(
+    f"Click checkpoints in order | Z = undo | S = save to {output_file}"
+)
 
 checkpoints = []
 running = True
@@ -31,8 +43,8 @@ while running:
             if event.key == pygame.K_z and checkpoints:
                 checkpoints.pop()
             elif event.key == pygame.K_s:
-                with open("checkpoints.json", "w") as f:
+                with open(output_file, "w") as f:
                     json.dump(checkpoints, f)
-                print(f"Saved {len(checkpoints)} checkpoints to checkpoints.json")
+                print(f"Saved {len(checkpoints)} checkpoints to {output_file}")
 
 pygame.quit()

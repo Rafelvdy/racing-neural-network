@@ -2,6 +2,7 @@ import pygame
 import math
 import random
 import json
+from copy import deepcopy
 from network import random_weights, random_biases, forward
 
 
@@ -12,10 +13,16 @@ START_TOLERANCE = 20
 SENSOR_ANGLES = [-60, -30, 0, 30, 60]
 SENSOR_MAX_RANGE = 200
 CHECKPOINT_RADIUS = 40
+RECOVERY_START_RADIUS = 18
+STUCK_CHECK_INTERVAL_MS = 2500
+STUCK_MIN_TRAVEL_DISTANCE = 120
+STUCK_MAX_NET_DISPLACEMENT = 40
+STUCK_STATIONARY_TIMEOUT_MS = 3000
 
 
 class car(pygame.sprite.Sprite):
-    def __init__(self, location, max_vel, rotation_vel, checkpoints=None):
+    def __init__(self, location, max_vel, rotation_vel, checkpoints=None,
+                 start_checkpoint_index=0, target_laps=1):
         pygame.sprite.Sprite.__init__(self)
         self.image = pygame.image.load("car.png").convert_alpha()
         self.rect = self.image.get_rect()
@@ -31,17 +38,46 @@ class car(pygame.sprite.Sprite):
         self.alive = True
         self.left_start = False
         self.lap_complete = False
+        self.target_laps = target_laps
+        self.lap_count = 0
         self.start_time = pygame.time.get_ticks()
+        self.lap_start_time = self.start_time
         self.lap_time = None
         self.crash_time = None
+        self.death_reason = None
 
         self.start_location = location
         self.max_distance_from_start = 0
         self.closest_distance_to_next = float("inf")
 
         self.checkpoints = checkpoints or []
-        self.next_checkpoint_index = 0
-        self.checkpoints_passed = 0
+        self.next_checkpoint_index = start_checkpoint_index
+        self.checkpoints_passed = start_checkpoint_index
+        self.is_recovery = start_checkpoint_index > 0
+        self.stuck_check_time = pygame.time.get_ticks()
+        self.stuck_check_x = self.x
+        self.stuck_check_y = self.y
+        self.distance_since_stuck_check = 0
+
+        if start_checkpoint_index == 0 and self.checkpoints:
+            target_x, target_y = self.checkpoints[0]
+            self.angle = math.degrees(math.atan2(
+                target_y - self.y,
+                target_x - self.x,
+            ))
+        self.last_motion_time = self.stuck_check_time
+
+        if start_checkpoint_index > 0 and checkpoints:
+            checkpoint_x, checkpoint_y = checkpoints[start_checkpoint_index - 1]
+            self.x = checkpoint_x + random.uniform(-RECOVERY_START_RADIUS, RECOVERY_START_RADIUS)
+            self.y = checkpoint_y + random.uniform(-RECOVERY_START_RADIUS, RECOVERY_START_RADIUS)
+            if start_checkpoint_index < len(checkpoints):
+                next_x, next_y = checkpoints[start_checkpoint_index]
+                self.angle = math.degrees(math.atan2(next_y - self.y, next_x - self.x))
+
+        self.stuck_check_x = self.x
+        self.stuck_check_y = self.y
+        self.distance_since_stuck_check = 0
 
         self.hidden_weights = random_weights(3, 5)
         self.hidden_biases = random_biases(3)
@@ -78,6 +114,42 @@ class car(pygame.sprite.Sprite):
             self.alive = False
             self.vel = 0
             self.crash_time = (pygame.time.get_ticks() - self.start_time) / 1000
+            self.death_reason = "crash"
+
+    def check_stuck(self):
+        if not self.alive:
+            return
+
+        now = pygame.time.get_ticks()
+        if now - self.last_motion_time >= STUCK_STATIONARY_TIMEOUT_MS:
+            self.alive = False
+            self.vel = 0
+            self.crash_time = (now - self.start_time) / 1000
+            self.death_reason = "stationary"
+            return
+
+        elapsed = now - self.stuck_check_time
+        if elapsed < STUCK_CHECK_INTERVAL_MS:
+            return
+
+        net_displacement = math.hypot(
+            self.x - self.stuck_check_x,
+            self.y - self.stuck_check_y,
+        )
+        is_looping = (
+            self.distance_since_stuck_check >= STUCK_MIN_TRAVEL_DISTANCE
+            and net_displacement <= STUCK_MAX_NET_DISPLACEMENT
+        )
+        if is_looping:
+            self.alive = False
+            self.vel = 0
+            self.crash_time = (now - self.start_time) / 1000
+            self.death_reason = "stuck"
+
+        self.stuck_check_time = now
+        self.stuck_check_x = self.x
+        self.stuck_check_y = self.y
+        self.distance_since_stuck_check = 0
 
     def check_checkpoints(self):
         if not self.checkpoints or self.next_checkpoint_index >= len(self.checkpoints):
@@ -92,6 +164,10 @@ class car(pygame.sprite.Sprite):
             self.checkpoints_passed += 1
             self.next_checkpoint_index += 1
             self.closest_distance_to_next = float("inf")
+            self.stuck_check_time = pygame.time.get_ticks()
+            self.stuck_check_x = self.x
+            self.stuck_check_y = self.y
+            self.distance_since_stuck_check = 0
 
     def move_forward(self, track):
         if not self.alive:
@@ -101,13 +177,17 @@ class car(pygame.sprite.Sprite):
         self.check_crash(track)
         self.check_lap(track)
         self.check_checkpoints()
+        self.check_stuck()
 
     def move(self):
+        previous_x, previous_y = self.x, self.y
         radians = math.radians(self.angle)
         vertical = math.cos(radians) * self.vel
         horizontal = math.sin(radians) * self.vel
         self.x += horizontal
         self.y += vertical
+        if math.hypot(self.x - previous_x, self.y - previous_y) > 0.01:
+            self.last_motion_time = pygame.time.get_ticks()
 
         current_distance = math.hypot(self.x - self.start_location[0], self.y - self.start_location[1])
         if current_distance > self.max_distance_from_start:
@@ -121,6 +201,7 @@ class car(pygame.sprite.Sprite):
         self.check_crash(track)
         self.check_lap(track)
         self.check_checkpoints()
+        self.check_stuck()
 
     def break_car(self):
         if not self.alive:
@@ -134,13 +215,29 @@ class car(pygame.sprite.Sprite):
         self.alive = True
         self.left_start = False
         self.lap_complete = False
+        self.lap_count = 0
         self.lap_time = None
         self.crash_time = None
+        self.death_reason = None
         self.max_distance_from_start = 0
         self.next_checkpoint_index = 0
         self.checkpoints_passed = 0
         self.start_time = pygame.time.get_ticks()
+        self.lap_start_time = self.start_time
         self.closest_distance_to_next = float("inf")
+        if self.checkpoints:
+            target_x, target_y = self.checkpoints[0]
+            self.angle = math.degrees(math.atan2(
+                target_y - self.y,
+                target_x - self.x,
+            ))
+        else:
+            self.angle = 270
+        self.stuck_check_time = self.start_time
+        self.stuck_check_x = self.x
+        self.stuck_check_y = self.y
+        self.distance_since_stuck_check = 0
+        self.last_motion_time = self.start_time
 
     def check_lap(self, track):
         if not self.alive or self.lap_complete:
@@ -153,8 +250,18 @@ class car(pygame.sprite.Sprite):
         elif on_start and self.left_start:
             if self.checkpoints and self.checkpoints_passed < len(self.checkpoints):
                 return   # hasn't actually completed the track — not a real lap
-            self.lap_complete = True
-            self.lap_time = (pygame.time.get_ticks() - self.start_time) / 1000
+            now = pygame.time.get_ticks()
+            self.lap_count += 1
+            self.lap_time = (now - self.lap_start_time) / 1000
+            if self.lap_count >= self.target_laps:
+                self.lap_complete = True
+                return
+
+            self.left_start = False
+            self.next_checkpoint_index = 0
+            self.checkpoints_passed = 0
+            self.closest_distance_to_next = float("inf")
+            self.lap_start_time = now
 
     def get_forward_vector(self):
         corners = self.get_corners()
@@ -196,13 +303,19 @@ class car(pygame.sprite.Sprite):
             self.reduce_speed(track)
 
     def fitness(self):
+        checkpoint_score = self.checkpoints_passed * 10_000
+
+        if self.closest_distance_to_next == float("inf"):
+            distance_score = 0
+        else:
+            distance_score = max(0, 1_000 - self.closest_distance_to_next)
+
+        survival_score = self.max_distance_from_start * 0.2
+
         if self.lap_complete:
-            return 1_000_000 + (self.checkpoints_passed * 1000) - (self.lap_time * 100)
+            return 1_000_000 - (self.lap_time * 100)
 
-        if self.checkpoints:
-            return (self.checkpoints_passed * 1000) - self.closest_distance_to_next
-
-        return self.max_distance_from_start
+        return checkpoint_score + distance_score + survival_score
 
 
 def blit_rotate_center(screen, image, center, angle):
@@ -311,26 +424,84 @@ def mutate(weights_bundle, rate=0.15, strength=0.4):
     )
 
 
-def next_generation(cars, start_pos, checkpoints=None, mutation_strength=0.4):
-    ranked = sorted(cars, key=lambda c: c.fitness(), reverse=True)
-    survivors = ranked[:4]
+def weights_from_car(car_obj):
+    return {
+        "hidden_weights": deepcopy(car_obj.hidden_weights),
+        "hidden_biases": deepcopy(car_obj.hidden_biases),
+        "output_weights": deepcopy(car_obj.output_weights),
+        "output_biases": deepcopy(car_obj.output_biases),
+    }
+
+
+def apply_weights(car_obj, weights):
+    car_obj.hidden_weights = deepcopy(weights["hidden_weights"])
+    car_obj.hidden_biases = deepcopy(weights["hidden_biases"])
+    car_obj.output_weights = deepcopy(weights["output_weights"])
+    car_obj.output_biases = deepcopy(weights["output_biases"])
+
+
+def update_checkpoint_archive(cars, archive):
+    for current_car in cars:
+        checkpoint_index = current_car.checkpoints_passed
+        if checkpoint_index == 0:
+            continue
+        saved = archive.get(str(checkpoint_index))
+        can_replace = (saved is None
+                       or (not current_car.is_recovery
+                           and current_car.fitness() > saved["fitness"]))
+        if can_replace:
+            archive[str(checkpoint_index)] = {
+                "fitness": current_car.fitness(),
+                "weights": weights_from_car(current_car),
+            }
+
+
+def next_generation(cars, start_pos, checkpoints=None, mutation_strength=0.4,
+                    mutation_rate=0.15, archive=None, recovery_checkpoint_index=0,
+                    recovery_fraction=0.25, immigrant_count=0):
+    normal_start_cars = [current_car for current_car in cars
+                         if not current_car.is_recovery]
+    ranked = sorted(normal_start_cars or cars,
+                    key=lambda c: c.fitness(), reverse=True)
+    survivors = ranked[:min(8, len(ranked))]
 
     new_cars = []
     best = survivors[0]
     elite = car(start_pos, 5, 4, checkpoints=checkpoints)
-    elite.hidden_weights = best.hidden_weights
-    elite.hidden_biases = best.hidden_biases
-    elite.output_weights = best.output_weights
-    elite.output_biases = best.output_biases
+    apply_weights(elite, weights_from_car(best))
     new_cars.append(elite)
 
-    while len(new_cars) < len(cars):
-        parent_a, parent_b = random.sample(survivors, 2)
-        mutated = mutate(crossover(parent_a, parent_b), strength=mutation_strength)
+    recovery_count = int(len(cars) * recovery_fraction) if recovery_checkpoint_index else 0
+    if recovery_count and archive:
+        archived = archive.get(str(recovery_checkpoint_index))
+        if archived:
+            recovery_elite = car(
+                start_pos,
+                5,
+                4,
+                checkpoints=checkpoints,
+                start_checkpoint_index=recovery_checkpoint_index,
+            )
+            apply_weights(recovery_elite, archived["weights"])
+            new_cars.append(recovery_elite)
+            recovery_count -= 1
 
-        child = car(start_pos, 5, 4, checkpoints=checkpoints)
+    while len(new_cars) < len(cars) - immigrant_count:
+        parent_a, parent_b = random.sample(survivors, 2)
+        mutated = mutate(crossover(parent_a, parent_b), rate=mutation_rate,
+                         strength=mutation_strength)
+
+        start_checkpoint_index = recovery_checkpoint_index if recovery_count > 0 else 0
+        if recovery_count > 0:
+            recovery_count -= 1
+
+        child = car(start_pos, 5, 4, checkpoints=checkpoints,
+                    start_checkpoint_index=start_checkpoint_index)
         child.hidden_weights, child.hidden_biases, child.output_weights, child.output_biases = mutated
         new_cars.append(child)
+
+    while len(new_cars) < len(cars):
+        new_cars.append(car(start_pos, 5, 4, checkpoints=checkpoints))
 
     return new_cars
 
@@ -353,6 +524,19 @@ def load_weights(car_obj, filename="best_car.json"):
     car_obj.hidden_biases = data["hidden_biases"]
     car_obj.output_weights = data["output_weights"]
     car_obj.output_biases = data["output_biases"]
+
+
+def save_archive(archive, filename="checkpoint_archive.json"):
+    with open(filename, "w") as f:
+        json.dump(archive, f)
+
+
+def load_archive(filename="checkpoint_archive.json"):
+    try:
+        with open(filename) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
 
 def load_checkpoints(filename="checkpoints.json"):

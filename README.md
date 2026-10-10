@@ -10,6 +10,7 @@ The project supports:
 - Recovery trials from the furthest learned checkpoint
 - Random immigrants and adaptive mutation when progress stalls
 - A one-car test mode for evaluating saved weights
+- Shared multi-track training with one population evaluated across every training track
 - Evaluation on a track that was not used during training
 
 ## Requirements
@@ -114,6 +115,36 @@ python game.py --mode test `
 
 The neural network only receives five local distance sensors, so it does not receive the track image or checkpoint coordinates directly. Checkpoints are used by the evolutionary fitness system and are not network inputs. For a meaningful unseen-track test, keep the final track and its checkpoint file out of the training process.
 
+## Shared Multi-Track Training
+
+Train one shared model across the known tracks with:
+
+```powershell
+python game.py --mode multi-train --tracks track1.png,track2.png,track3.png --checkpoint-files track1_checkpoints.json,track2_checkpoints.json,track3_checkpoints.json --weights shared_best.json
+```
+
+The simulations update every frame, but the dashboard is rendered every three frames by default to keep visualisation from slowing training. For more speed, render less often:
+
+```powershell
+python game.py --mode multi-train --tracks track1.png,track2.png,track3.png --checkpoint-files track1_checkpoints.json,track2_checkpoints.json,track3_checkpoints.json --weights shared_best_v2.json --render-every 10
+```
+
+Use `--render-every 1` for a dashboard update every frame. A larger value changes only how often the screen is drawn, not how often the cars are simulated.
+
+The same population is evaluated on every listed track in each generation. Each genome receives a normalized score per track, then a combined score:
+
+```text
+combined score = 0.3 * average track score + 0.7 * worst track score
+```
+
+The worst-track term prevents a genome from succeeding on two tracks while failing the third. The lowest-scoring track is recalculated for every genome and every generation, so no track is permanently privileged. The mode seeds the new population from existing per-track champions when available, while retaining random genomes and later immigrants. Every car starts from the real start line; checkpoint recovery starts are disabled so the shared score remains fair.
+
+The selected champion's individual track scores and current hardest track are printed each generation. Save the shared model as `shared_best.json`, and never include the final unseen track in either the `--tracks` or `--checkpoint-files` lists.
+
+During shared training, the fourth dashboard panel is a neural observer for the current best Track 1 car. It visualizes the five sensor values, three hidden-neuron activations, steering and throttle outputs, and the resulting driving decision. The other panels continue to show the track simulations. This is diagnostic display only and does not change training or give the network extra inputs.
+
+After five stagnant generations, the trainer launches a small recovery experiment on the currently weakest track. Recovery cars start near the furthest checkpoint reached by normal-start cars and explore mutated policies locally. Their recovery scores are never used directly to save a model or select the champion. A recovered policy is inserted into the next population and must then perform from the normal start on every track before it can win.
+
 ## Training Tutorial
 
 ### 1. Start clean
@@ -169,11 +200,11 @@ Do not run training with the final evaluation track or its checkpoints. Test a m
 python game.py --mode test --track final_track.png --checkpoints final_track_checkpoints.json --weights best_car.json
 ```
 
-### 5. Understand simultaneous training
+### 5. Train the shared model
 
-The current runner trains one track per process. Starting two commands at once creates two independent populations; it does not train one shared model. For a genuinely general model, a future multi-track mode should evaluate the same population on every training track and select networks using both average and worst-track fitness.
+The shared trainer evaluates one population on every listed training track. It uses normalized scores and dynamic worst-track pressure, so whichever track is hardest at a given time receives the selection pressure automatically.
 
-Until that mode exists, separate per-track training is the reliable workflow. It also gives you useful baselines for deciding whether a later shared model is actually generalising.
+Keep the final evaluation track out of both track lists. Separate per-track models remain useful baselines, but `shared_best.json` is the model intended for generalisation.
 
 ## How Training Works
 

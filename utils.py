@@ -3,7 +3,7 @@ import math
 import random
 import json
 from copy import deepcopy
-from network import random_weights, random_biases, forward
+from network import (forward_with_trace, random_weights, random_biases)
 
 GRASS = (34, 177, 76)
 TOLERANCE = 25
@@ -58,6 +58,9 @@ class car(pygame.sprite.Sprite):
         self.last_motion_time = self.stuck_check_time
         self.previous_x = self.x
         self.previous_y = self.y
+        self.sensor_values = [0.0] * 5
+        self.hidden_values = [0.0] * 3
+        self.output_values = [0.0] * 2
 
         if start_checkpoint_index > 0 and self.checkpoints:
             checkpoint_x, checkpoint_y = self.checkpoints[start_checkpoint_index - 1]
@@ -86,14 +89,17 @@ class car(pygame.sprite.Sprite):
         elif right:
             self.angle -= self.rotation_vel
 
-    def draw(self, screen, track):
+    def draw(self, screen, track, show_sensors=False):
         blit_rotate_center(screen, self.image, (self.x, self.y), self.angle)
         colour = (255, 0, 255) if self.alive else (100, 100, 100)
         for corner_x, corner_y in self.get_corners():
             pygame.draw.circle(screen, colour, (int(corner_x), int(corner_y)), 3)
-        for distance, (end_x, end_y) in self.get_sensor_readings(track):
-            pygame.draw.line(screen, (0, 200, 255), (self.x, self.y), (end_x, end_y), 1)
-            pygame.draw.circle(screen, (0, 200, 255), (int(end_x), int(end_y)), 3)
+        if show_sensors:
+            for distance, (end_x, end_y) in self.get_sensor_readings(track):
+                pygame.draw.line(screen, (0, 200, 255),
+                                 (self.x, self.y), (end_x, end_y), 1)
+                pygame.draw.circle(screen, (0, 200, 255),
+                                   (int(end_x), int(end_y)), 3)
 
     def check_crash(self, track):
         if self.alive and any(is_grass(track, x, y) for x, y in self.get_corners()):
@@ -250,7 +256,15 @@ class car(pygame.sprite.Sprite):
         return [distance / SENSOR_MAX_RANGE for distance, _ in self.get_sensor_readings(track)]
 
     def drive_with_network(self, track):
-        steering, throttle = forward(self.get_sensor_distances(track), self.hidden_weights, self.hidden_biases, self.output_weights, self.output_biases)
+        self.sensor_values = self.get_sensor_distances(track)
+        self.hidden_values, self.output_values = forward_with_trace(
+            self.sensor_values,
+            self.hidden_weights,
+            self.hidden_biases,
+            self.output_weights,
+            self.output_biases,
+        )
+        steering, throttle = self.output_values
         if steering > 0.1:
             self.rotate(right=True)
         elif steering < -0.1:

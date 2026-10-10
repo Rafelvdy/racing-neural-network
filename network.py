@@ -18,8 +18,21 @@ def layer(inputs, weights_list, biases):
 
 
 def forward(inputs, hidden_weights, hidden_biases, output_weights, output_biases):
+    _, output = forward_with_trace(
+        inputs,
+        hidden_weights,
+        hidden_biases,
+        output_weights,
+        output_biases,
+    )
+    return output
+
+
+def forward_with_trace(inputs, hidden_weights, hidden_biases,
+                       output_weights, output_biases):
     hidden_output = layer(inputs, hidden_weights, hidden_biases)
-    return layer(hidden_output, output_weights, output_biases)
+    output = layer(hidden_output, output_weights, output_biases)
+    return hidden_output, output
 
 
 def random_weights(n_neurons, n_inputs):
